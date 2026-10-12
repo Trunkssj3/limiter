@@ -25,12 +25,69 @@ jobs:
                   versionCode = 1
                   versionName = "1.0"
               }
+              signingConfigs {
+                  getByName("debug") {
+                      storeFile = file("debug.keystore")
+                      storePassword = "android"
+                      keyAlias = "androiddebugkey"
+                      keyPassword = "android"
+                  }
+              }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
               }
               kotlinOptions { jvmTarget = "17" }
           }
+          SLEOF
+          mkdir -p app
+          base64 -d > app/debug.keystore <<'SLEOF'
+          MIIKJgIBAzCCCdAGCSqGSIb3DQEHAaCCCcEEggm9MIIJuTCCBcAGCSqGSIb3DQEHAaCCBbEEggWt
+          MIIFqTCCBaUGCyqGSIb3DQEMCgECoIIFQDCCBTwwZgYJKoZIhvcNAQUNMFkwOAYJKoZIhvcNAQUM
+          MCsEFDbKO6CQD96C6Bogy9m5XSvFSeIOAgInEAIBIDAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQB
+          KgQQdtvUShTVwJBmokuJKMtlLwSCBNCoV67mY43teVvFbae9twwhb1mpOonHYJcHdM1USdTtvqzS
+          VdThA5Ytxwk6Qpm83Cf4ri/f9YmTNbbMP7Cg10Q01RTV5dUdMRfyFHbcfUyJ9aRxCCt/VBZebLLq
+          9MB9TesRBYxgIouQ8ynBfPlCU2FL4aUHdGzlrZ72AIfRJyUc+auKVOoCvui9xt22JwlHIZNOtd0z
+          GGQjAT3oySWgYOFkaJ9VY+Gw5IoV39ekcNVaHsF22g9UQim6LSOAjv0RYa6b49567eUXADvK7WYF
+          7oH3W3H8gLy1ItvJVlHmrXaRf8nCj3poZ29nckhVqG6Im40MYbF0rB67jgSCmE2/8XTpEdD8wnXw
+          sTUEOd8xX731bhqKWvy48keINa2q4c99GrpSN4F7F9/TU7nakTkltQQZg05uNjw7DLc+9fCIKRWZ
+          HUy1Mb4O1ZYM2XsNq9XzQIe4AD5Z66fRZ7OhJtlnr74Y4W7QhCrZn1R4/Ye73KTOOLHott5hind1
+          T9UAPqQW/gfFpgPP8co2uOPDKqZSLtMl2m5yJ7nnZnf1NGSL6wKzwrjZVWiqnNKQRhzQ7YCuvWor
+          dlj4JzQFnW4YYyaiMRglsg2NaOzewjSAIaOkjJKAkgVaiF7ihJ42k80ylemFqJRAORFgtmoDzrW3
+          YeV18Qkgjm6NUfaI/5jYcquwWbXdGOssrAGAKCIc3YLkwmf6gmoHlIjEm4IOj8/Mr9IVMCvM6xBW
+          IIvxLCtbgkyIDtTc29b4ERFslNNMvUoDh4ZzGZ2Z0gOEOtTcIfSlC8MaR1EGW9KenhqQ1jFOPTEH
+          hFjBDmUHVoSNgUYfc2K1uHuG46nEaScC+sN3BrqNhKcwEbfMe45dbXSFZaDolAvCeGuw/E2Ap8WN
+          la/YDCdScq4xuiTIGHyn+ItJTp54Qakf2uEJwFi4ybBrboKgt10KeXM2P6Z5bzKCe5pN1UGjuufw
+          qj1eIQ9+QUISkRd9Kc4Llmo51xpH+xpI4/ytiEg2ySZz1coL1KgW6TzWnT8vUg/34EOTSybicVnv
+          YOm1iVdbtmzWcNYc7+fDFp41Yj6/XcdYmEMRHolgoqO2kfErj7oy22Uc4VJ+m+aBPCgKt0I70pFj
+          np6v3GZZ9+BDt00qMqUSrTnSISRMuuQ+fWdkWK8HvY80B0TLn5x9R2RTQlsx+xIqHOTzUXSGxzbN
+          dY1t4NNDRnI2JUJr4sKxOrDlBg49wIZotzfwrVzQLo1NPwxEEey7ujZK8XJeHocA02YPQxri8x7w
+          HWj3hN4NOYHz0jzh/LryC4RLx2/R27NxeA0PQO8hbfoRMpjfyoy2wViqr1etgm5eMKQmdMq2mRlV
+          2UtVh4P5AkmiLd8goVlAsaqkZQp/Nk5xHfNeDMvol2DzYrTvraI7DAqty6j1gM4gCgIBtzrY/6Lm
+          wWK9Rm2os+qP7vus+Kk5vbkI9IGWiWd4TL7ul81DkXyIHNcawjm4o3MvnWHGwFGXTUJK30rh5l2U
+          HH6amZ09Y3owp/2ROg97Sa8aibPjKjtBKNeR3JviuDpPaUvawlwBdPY4HVYkH/CLl0VQ/uG5VXsV
+          ZcXFqxfMZD+zCHxKRqY7iKBDHsGzBlrDTjtd5n2ZF+zW9Tsy1moOA/OLfSlapOCi2EQxxUnN71Ub
+          fTFSMC0GCSqGSIb3DQEJFDEgHh4AYQBuAGQAcgBvAGkAZABkAGUAYgB1AGcAawBlAHkwIQYJKoZI
+          hvcNAQkVMRQEElRpbWUgMTc5MTc4MDE1ODY1MjCCA/EGCSqGSIb3DQEHBqCCA+IwggPeAgEAMIID
+          1wYJKoZIhvcNAQcBMGYGCSqGSIb3DQEFDTBZMDgGCSqGSIb3DQEFDDArBBS98/Bf/bjhxf3sEKmm
+          IR6vMTsMCgICJxACASAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEDfQi0bQ0KYFrH0w+RTo
+          PHaAggNgMk2JltvfRoi/CD9AK0mDqoHNJy8x7yuzaOVDNixt/dmiYT0xruy5OEzVQaALqI92uLvn
+          5i+bPrLGQfzsTwdCrn2XwyTJLN+NTwNEfznIinxsN9KCg4ibrThzk1qYqphVaNd8hI200my7hwF0
+          1Qmn+2BOiynF5WqRrEIrVUL4QBOTbPaLw55y4hYs01neFpZjhblvCGEFyXFqt+bwzV6k/inFMWc/
+          q0QLrofrNT0utr0X7Uq5BxagpUSBsz5pKFpFJg6yN35ci3oizj083998ilnNfFNoWZk2+BjV3bCU
+          /pTtupPfrLoJDxhcTXfr6y7Nq4qW6n63Ixp7En7x8VKi7MHr0mywEWn6FPyxB1jPZKUZ5KudHUvo
+          GLiXk83FIPKrD4cF8LZ7q/g+bvMxrwtfLSQuoFD5GLDU7je08o5UirPHw34gHoby6CDrjRxT2iE0
+          RqkGLjSt1mZjsrUwS6EyoFQnwTuk8WqwoPTXUmbForeHvMwFKOQaZCjzIS/fNMC/zOb5vmPzvpmE
+          8ux3Y9Q6vGf0KbXUVFRX5DjiTiG2F7XiUx7oMuqNT7w3UWaZ3BisNg/kA/9nRG1LGxrjj/8dw/An
+          fTO3StKu5THP2I6OZmaVFz4TbSaySB99xUQH6dHybO41qeQIcTXZka0CLHu3ssNmHwG43J/i2GBz
+          5U30Twty/votXjY7UCLeAqzhlzW6gPPKjLmO7ejrDRS7amw38S5T5wCu2gWpgREJp1+/emSMMv1G
+          wByQZdLtFYQVprLjIhY8eKI7ga10+Q8OPYwa5+BP7CC4kPVwTilCoHp79hNnWlCQq/wKhIJmb0+i
+          7tRsGE0aofAr+00Ce2aNl6Dv5sv70tPY6wLo31IZNIuTCQLognfRkYiw1iH8pjyU1InIWxGBs1xm
+          oImDgzXY7dqQqlGHe2JZVNOHpUz5Md2jCitz6iT/KP89z5Z69J++IKg0aqPTwBxk4aVNrwFF5U5u
+          nEtQrCs7kwer+Ii56C+sUsRfI63Jq6rKTOJb8i3046NxMH/hui6A0tLIaaf62sQPoHunNQPZ0aDS
+          bAdvHHbvlTY1u4wWwOkAb7u8O1N/1+XmoezjdCr50nBo32Ek2fq6kCE6ta+MGlp7NnqfBHEEYffL
+          ctYmyW/qPgPDKaaeQm1BME0wMTANBglghkgBZQMEAgEFAAQgnKqp4CXve5R8cM2nRQ5oTsAQDB8B
+          EBx0MIx+oIiFSK0EFN565J8yIq+dxs76yKZf1aJf6VsDAgInEA==
           SLEOF
           mkdir -p app/src/main
           cat > app/src/main/AndroidManifest.xml <<'SLEOF'
@@ -102,7 +159,7 @@ jobs:
 
               private val tick = object : Runnable {
                   override fun run() {
-                      check()
+                      try { check() } catch (e: Exception) { /* לא מפילים את השירות */ }
                       handler.postDelayed(this, 1000)
                   }
               }
@@ -176,11 +233,13 @@ jobs:
 
               // חסימה מיידית בכניסה, כדי שלא יהיה חלון זמן קצר של גישה
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                  if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-                      Store.isOver(this) && onTarget()
-                  ) {
-                      performGlobalAction(GLOBAL_ACTION_HOME)
-                  }
+                  try {
+                      if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                          Store.isOver(this) && onTarget()
+                      ) {
+                          performGlobalAction(GLOBAL_ACTION_HOME)
+                      }
+                  } catch (e: Exception) { /* לא מפילים את השירות */ }
               }
 
               override fun onInterrupt() {}
@@ -196,6 +255,7 @@ jobs:
           package com.example.sociallimiter
 
           import android.app.Activity
+          import android.content.ComponentName
           import android.content.Intent
           import android.graphics.Color
           import android.os.Bundle
@@ -273,7 +333,8 @@ jobs:
 
               private fun serviceEnabled(): Boolean {
                   val s = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-                  return s.contains("$packageName/${LimiterService::class.java.name}")
+                  val me = ComponentName(this, LimiterService::class.java)
+                  return s.split(':').any { ComponentName.unflattenFromString(it) == me }
               }
 
               private fun update() {
