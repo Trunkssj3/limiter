@@ -159,7 +159,10 @@ jobs:
 
               private val tick = object : Runnable {
                   override fun run() {
-                      try { check() } catch (e: Exception) { /* לא מפילים את השירות */ }
+                      Store.beat(this@LimiterService)
+                      try { check() } catch (e: Exception) {
+                          Store.log(this@LimiterService, "שגיאה: " + e.javaClass.simpleName + " " + e.message)
+                      }
                       handler.postDelayed(this, 1000)
                   }
               }
@@ -227,8 +230,14 @@ jobs:
               }
 
               override fun onServiceConnected() {
+                  Store.log(this, "השירות התחבר")
                   handler.removeCallbacks(tick)
                   handler.post(tick)
+              }
+
+              override fun onUnbind(intent: android.content.Intent?): Boolean {
+                  Store.log(this, "השירות נותק (unbind) - המערכת או המשתמש כיבו אותו")
+                  return super.onUnbind(intent)
               }
 
               // חסימה מיידית בכניסה, כדי שלא יהיה חלון זמן קצר של גישה
@@ -239,12 +248,15 @@ jobs:
                       ) {
                           performGlobalAction(GLOBAL_ACTION_HOME)
                       }
-                  } catch (e: Exception) { /* לא מפילים את השירות */ }
+                  } catch (e: Exception) {
+                      Store.log(this, "שגיאה באירוע: " + e.javaClass.simpleName + " " + e.message)
+                  }
               }
 
               override fun onInterrupt() {}
 
               override fun onDestroy() {
+                  Store.log(this, "השירות נהרס (onDestroy)")
                   handler.removeCallbacks(tick)
                   super.onDestroy()
               }
@@ -274,6 +286,7 @@ jobs:
               private lateinit var bar: ProgressBar
               private lateinit var input: EditText
               private lateinit var msg: TextView
+              private lateinit var logView: TextView
               private val handler = Handler(Looper.getMainLooper())
               private val refresh = object : Runnable {
                   override fun run() { update(); handler.postDelayed(this, 1000) }
@@ -314,6 +327,10 @@ jobs:
                       setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                   })
 
+                  root.addView(text(14f).apply { text = "יומן שירות (לאבחון):"; setPadding(0, dp(24), 0, dp(4)) })
+                  logView = text(12f).apply { setTextIsSelectable(true) }
+                  root.addView(logView)
+
                   setContentView(ScrollView(this).apply { addView(root) })
               }
 
@@ -342,7 +359,14 @@ jobs:
                   val limit = Store.limitMinutes(this)
                   used.text = "%d:%02d מתוך %d:00 דקות".format(secs / 60, secs % 60, limit)
                   bar.progress = minOf(100, secs * 100 / (limit * 60))
-                  status.text = if (serviceEnabled()) "✅ השירות פעיל" else "⚠️ השירות כבוי — הפעל אותו בהגדרות נגישות"
+                  val beat = Store.lastBeat(this)
+                  val ago = (System.currentTimeMillis() - beat) / 1000
+                  status.text = when {
+                      beat > 0 && ago < 5 -> "✅ השירות פעיל"
+                      serviceEnabled() -> "⚠️ מופעל בהגדרות אבל לא מגיב (פעילות אחרונה לפני " + ago + " שניות)"
+                      else -> "⚠️ השירות כבוי — הפעל אותו בהגדרות נגישות"
+                  }
+                  logView.text = Store.logText(this).ifEmpty { "(אין עדיין אירועים)" }
               }
 
               override fun onResume() { super.onResume(); handler.post(refresh) }
@@ -381,6 +405,19 @@ jobs:
               }
 
               fun isOver(c: Context) = usedSeconds(c) >= limitMinutes(c) * 60
+
+              // "דופק" של השירות: מתעדכן כל שנייה כשהשירות חי
+              fun beat(c: Context) = p(c).edit().putLong("beat", System.currentTimeMillis()).apply()
+              fun lastBeat(c: Context) = p(c).getLong("beat", 0L)
+
+              // יומן אירועים קצר (15 האחרונים)
+              fun log(c: Context, msg: String) {
+                  val t = java.text.SimpleDateFormat("dd/MM HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+                  val old = p(c).getString("log", "") ?: ""
+                  val lines = (listOf("$t  $msg") + old.split("\n").filter { it.isNotBlank() }).take(15)
+                  p(c).edit().putString("log", lines.joinToString("\n")).apply()
+              }
+              fun logText(c: Context): String = p(c).getString("log", "") ?: ""
           }
           SLEOF
           mkdir -p app/src/main/res/values
