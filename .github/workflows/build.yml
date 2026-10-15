@@ -92,7 +92,17 @@ jobs:
           mkdir -p app/src/main
           cat > app/src/main/AndroidManifest.xml <<'SLEOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission
+                  android:name="android.permission.WRITE_SECURE_SETTINGS"
+                  tools:ignore="ProtectedPermissions" />
+
               <application
                   android:label="מגביל רשתות"
                   android:supportsRtl="true"
@@ -117,8 +127,163 @@ jobs:
                           android:name="android.accessibilityservice"
                           android:resource="@xml/accessibility_config" />
                   </service>
+
+                  <service
+                      android:name=".GuardService"
+                      android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="Keeps the social media limiter accessibility service enabled" />
+                  </service>
+
+                  <receiver android:name=".BootReceiver" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                      </intent-filter>
+                  </receiver>
               </application>
           </manifest>
+          SLEOF
+          mkdir -p app/src/main/java/com/example/sociallimiter
+          cat > app/src/main/java/com/example/sociallimiter/BootReceiver.kt <<'SLEOF'
+          package com.example.sociallimiter
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent?) {
+                  GuardService.start(context)
+              }
+          }
+          SLEOF
+          mkdir -p app/src/main/java/com/example/sociallimiter
+          cat > app/src/main/java/com/example/sociallimiter/Enabler.kt <<'SLEOF'
+          package com.example.sociallimiter
+
+          import android.content.ComponentName
+          import android.content.Context
+          import android.content.pm.PackageManager
+          import android.provider.Settings
+
+          object Enabler {
+              private fun me(c: Context) = ComponentName(c, LimiterService::class.java)
+
+              fun isEnabled(c: Context): Boolean {
+                  val s = Settings.Secure.getString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+                  val me = me(c)
+                  return s.split(":").any { ComponentName.unflattenFromString(it) == me }
+              }
+
+              // ההרשאה ניתנת פעם אחת דרך adb
+              fun canWrite(c: Context) =
+                  c.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+
+              fun tryEnable(c: Context): Boolean {
+                  if (!canWrite(c)) return false
+                  return try {
+                      val cr = c.contentResolver
+                      val flat = me(c).flattenToString()
+                      val cur = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
+                      val next = if (cur.isBlank()) flat else "$cur:$flat"
+                      Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next)
+                      Settings.Secure.putString(cr, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                      true
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+          }
+          SLEOF
+          mkdir -p app/src/main/java/com/example/sociallimiter
+          cat > app/src/main/java/com/example/sociallimiter/GuardService.kt <<'SLEOF'
+          package com.example.sociallimiter
+
+          import android.app.NotificationManager
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.database.ContentObserver
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.provider.Settings
+
+          // שירות רקע שמשגיח על שירות הנגישות ומפעיל אותו מחדש אם כובה
+          class GuardService : Service() {
+
+              companion object {
+                  fun start(c: Context) {
+                      try {
+                          c.startForegroundService(Intent(c, GuardService::class.java))
+                      } catch (e: Exception) {
+                          // המערכת לא מרשה להתחיל כרגע; ננסה שוב בפעם הבאה
+                      }
+                  }
+              }
+
+              private val handler = Handler(Looper.getMainLooper())
+              private var observer: ContentObserver? = null
+              private var lastTry = 0L
+
+              private val periodic = object : Runnable {
+                  override fun run() {
+                      ensure()
+                      handler.postDelayed(this, 30_000)
+                  }
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  Notifier.createChannels(this)
+                  startForeground(1, Notifier.ongoing(this))
+
+                  val obs = object : ContentObserver(handler) {
+                      override fun onChange(selfChange: Boolean) {
+                          handler.postDelayed({ ensure() }, 1500)
+                      }
+                  }
+                  observer = obs
+                  contentResolver.registerContentObserver(
+                      Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), false, obs
+                  )
+                  handler.post(periodic)
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+              private fun ensure() {
+                  try {
+                      val nm = getSystemService(NotificationManager::class.java)
+                      if (Enabler.isEnabled(this)) {
+                          nm.cancel(2)
+                          return
+                      }
+                      val now = System.currentTimeMillis()
+                      if (Enabler.canWrite(this)) {
+                          if (now - lastTry > 5000) {
+                              lastTry = now
+                              Enabler.tryEnable(this)
+                          }
+                      } else {
+                          Notifier.off(this)
+                      }
+                  } catch (e: Exception) {
+                      // לא מפילים את השירות
+                  }
+              }
+
+              override fun onDestroy() {
+                  handler.removeCallbacks(periodic)
+                  observer?.let { contentResolver.unregisterContentObserver(it) }
+                  super.onDestroy()
+              }
+          }
           SLEOF
           mkdir -p app/src/main/java/com/example/sociallimiter
           cat > app/src/main/java/com/example/sociallimiter/LimiterService.kt <<'SLEOF'
@@ -160,8 +325,10 @@ jobs:
               private val tick = object : Runnable {
                   override fun run() {
                       Store.beat(this@LimiterService)
-                      try { check() } catch (e: Exception) {
-                          Store.log(this@LimiterService, "שגיאה: " + e.javaClass.simpleName + " " + e.message)
+                      try {
+                          doCheck()
+                      } catch (e: Exception) {
+                          // לא מפילים את השירות
                       }
                       handler.postDelayed(this, 1000)
                   }
@@ -216,7 +383,15 @@ jobs:
                   return stickyOnSite
               }
 
-              private fun check() {
+              private fun maybeWarn() {
+                  val warnAt = Store.limitMinutes(this) * 60 - 120
+                  if (warnAt > 0 && Store.usedSeconds(this) >= warnAt && !Store.warnedToday(this)) {
+                      Store.setWarned(this)
+                      Notifier.warn(this)
+                  }
+              }
+
+              private fun doCheck() {
                   val pm = getSystemService(PowerManager::class.java)
                   if (!pm.isInteractive) return                       // המסך כבוי - לא סופרים
                   if (!onTarget()) return
@@ -226,18 +401,14 @@ jobs:
                       Toast.makeText(this, "נגמר הזמן להיום ברשתות החברתיות", Toast.LENGTH_LONG).show()
                   } else {
                       Store.addSecond(this)
+                      maybeWarn()
                   }
               }
 
               override fun onServiceConnected() {
-                  Store.log(this, "השירות התחבר")
+                  GuardService.start(this)
                   handler.removeCallbacks(tick)
                   handler.post(tick)
-              }
-
-              override fun onUnbind(intent: android.content.Intent?): Boolean {
-                  Store.log(this, "השירות נותק (unbind) - המערכת או המשתמש כיבו אותו")
-                  return super.onUnbind(intent)
               }
 
               // חסימה מיידית בכניסה, כדי שלא יהיה חלון זמן קצר של גישה
@@ -249,14 +420,13 @@ jobs:
                           performGlobalAction(GLOBAL_ACTION_HOME)
                       }
                   } catch (e: Exception) {
-                      Store.log(this, "שגיאה באירוע: " + e.javaClass.simpleName + " " + e.message)
+                      // לא מפילים את השירות
                   }
               }
 
               override fun onInterrupt() {}
 
               override fun onDestroy() {
-                  Store.log(this, "השירות נהרס (onDestroy)")
                   handler.removeCallbacks(tick)
                   super.onDestroy()
               }
@@ -266,10 +436,13 @@ jobs:
           cat > app/src/main/java/com/example/sociallimiter/MainActivity.kt <<'SLEOF'
           package com.example.sociallimiter
 
+          import android.Manifest
           import android.app.Activity
-          import android.content.ComponentName
+          import android.app.AlertDialog
           import android.content.Intent
+          import android.content.pm.PackageManager
           import android.graphics.Color
+          import android.os.Build
           import android.os.Bundle
           import android.os.Handler
           import android.os.Looper
@@ -282,11 +455,13 @@ jobs:
           class MainActivity : Activity() {
 
               private lateinit var status: TextView
+              private lateinit var auto: TextView
+              private lateinit var adbHint: TextView
               private lateinit var used: TextView
               private lateinit var bar: ProgressBar
               private lateinit var input: EditText
+              private lateinit var saveBtn: Button
               private lateinit var msg: TextView
-              private lateinit var logView: TextView
               private val handler = Handler(Looper.getMainLooper())
               private val refresh = object : Runnable {
                   override fun run() { update(); handler.postDelayed(this, 1000) }
@@ -304,19 +479,26 @@ jobs:
                   fun text(size: Float) = TextView(this).apply { textSize = size; gravity = Gravity.START }
 
                   root.addView(text(24f).apply { text = "מגביל רשתות חברתיות" })
-                  root.addView(text(14f).apply { text = "LinkedIn · Instagram · Facebook — אפליקציות ואתרים בדפדפן, זמן משותף"; setPadding(0, dp(4), 0, dp(24)) })
+                  root.addView(text(14f).apply {
+                      text = "LinkedIn · Instagram · Facebook — אפליקציות ואתרים בדפדפן, זמן משותף"
+                      setPadding(0, dp(4), 0, dp(24))
+                  })
 
                   used = text(20f); root.addView(used)
                   bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
                   root.addView(bar, LinearLayout.LayoutParams(-1, dp(16)).apply { topMargin = dp(8); bottomMargin = dp(24) })
 
                   root.addView(text(16f).apply { text = "מגבלה יומית (דקות):" })
-                  input = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; setText(Store.limitMinutes(this@MainActivity).toString()) }
+                  input = EditText(this).apply {
+                      inputType = InputType.TYPE_CLASS_NUMBER
+                      setText(Store.limitMinutes(this@MainActivity).toString())
+                  }
                   root.addView(input)
-                  root.addView(Button(this).apply {
+                  saveBtn = Button(this).apply {
                       text = "שמור"
                       setOnClickListener { save() }
-                  })
+                  }
+                  root.addView(saveBtn)
                   msg = text(13f).apply { setTextColor(Color.RED) }
                   root.addView(msg)
 
@@ -327,31 +509,34 @@ jobs:
                       setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                   })
 
-                  root.addView(text(14f).apply { text = "יומן שירות (לאבחון):"; setPadding(0, dp(24), 0, dp(4)) })
-                  logView = text(12f).apply { setTextIsSelectable(true) }
-                  root.addView(logView)
+                  auto = text(14f).apply { setPadding(0, dp(24), 0, dp(4)) }
+                  root.addView(auto)
+                  adbHint = text(12f).apply {
+                      setTextIsSelectable(true)
+                      text = "להפעלה אוטומטית מלאה, חבר למחשב והרץ פעם אחת:\nadb shell pm grant com.example.sociallimiter android.permission.WRITE_SECURE_SETTINGS"
+                  }
+                  root.addView(adbHint)
 
                   setContentView(ScrollView(this).apply { addView(root) })
+
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                  ) {
+                      requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+                  }
+                  GuardService.start(this)
               }
 
               private fun save() {
+                  if (Store.limitLocked(this)) return
                   val v = input.text.toString().toIntOrNull() ?: return
-                  if (v < 1) return
-                  val cur = Store.limitMinutes(this)
-                  // אחרי שהזמן נגמר אי אפשר להגדיל את המגבלה באותו יום
-                  if (v > cur && Store.isOver(this)) {
-                      msg.text = "אי אפשר להגדיל מגבלה אחרי שהזמן נגמר 🙂"
-                      return
-                  }
-                  Store.setLimitMinutes(this, v)
-                  msg.text = ""
-                  update()
-              }
-
-              private fun serviceEnabled(): Boolean {
-                  val s = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-                  val me = ComponentName(this, LimiterService::class.java)
-                  return s.split(':').any { ComponentName.unflattenFromString(it) == me }
+                  if (v < 1 || v > 600) return
+                  AlertDialog.Builder(this)
+                      .setTitle("לנעול את המגבלה?")
+                      .setMessage("המגבלה תהיה $v דקות, ולא ניתן יהיה לשנות אותה עד מחר.")
+                      .setPositiveButton("אישור") { _, _ -> Store.setLimitMinutes(this, v); update() }
+                      .setNegativeButton("ביטול", null)
+                      .show()
               }
 
               private fun update() {
@@ -359,18 +544,94 @@ jobs:
                   val limit = Store.limitMinutes(this)
                   used.text = "%d:%02d מתוך %d:00 דקות".format(secs / 60, secs % 60, limit)
                   bar.progress = minOf(100, secs * 100 / (limit * 60))
+
+                  val locked = Store.limitLocked(this)
+                  input.isEnabled = !locked
+                  saveBtn.isEnabled = !locked
+                  if (locked) {
+                      if (input.text.toString() != limit.toString()) input.setText(limit.toString())
+                      msg.text = "🔒 המגבלה נעולה להיום. אפשר לשנות אותה מחר."
+                  } else {
+                      msg.text = ""
+                  }
+
                   val beat = Store.lastBeat(this)
                   val ago = (System.currentTimeMillis() - beat) / 1000
                   status.text = when {
                       beat > 0 && ago < 5 -> "✅ השירות פעיל"
-                      serviceEnabled() -> "⚠️ מופעל בהגדרות אבל לא מגיב (פעילות אחרונה לפני " + ago + " שניות)"
+                      Enabler.isEnabled(this) -> "⏳ השירות מופעל, מתחבר..."
                       else -> "⚠️ השירות כבוי — הפעל אותו בהגדרות נגישות"
                   }
-                  logView.text = Store.logText(this).ifEmpty { "(אין עדיין אירועים)" }
+
+                  val canWrite = Enabler.canWrite(this)
+                  auto.text = if (canWrite) "🔁 הפעלה אוטומטית מחדש: פעילה"
+                  else "🔁 הפעלה אוטומטית מחדש: לא הוגדרה. אם השירות ייכבה תקבל התראה, ולחיצה עליה תפתח את ההגדרות."
+                  adbHint.visibility = if (canWrite) View.GONE else View.VISIBLE
               }
 
               override fun onResume() { super.onResume(); handler.post(refresh) }
               override fun onPause() { handler.removeCallbacks(refresh); super.onPause() }
+          }
+          SLEOF
+          mkdir -p app/src/main/java/com/example/sociallimiter
+          cat > app/src/main/java/com/example/sociallimiter/Notifier.kt <<'SLEOF'
+          package com.example.sociallimiter
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.content.Context
+          import android.content.Intent
+          import android.provider.Settings
+          import android.widget.Toast
+
+          object Notifier {
+              const val CH_ONGOING = "ongoing"
+              const val CH_ALERT = "alerts"
+
+              fun createChannels(c: Context) {
+                  val nm = c.getSystemService(NotificationManager::class.java)
+                  nm.createNotificationChannel(NotificationChannel(CH_ONGOING, "פועל ברקע", NotificationManager.IMPORTANCE_MIN))
+                  nm.createNotificationChannel(NotificationChannel(CH_ALERT, "התראות", NotificationManager.IMPORTANCE_HIGH))
+              }
+
+              fun ongoing(c: Context): Notification =
+                  Notification.Builder(c, CH_ONGOING)
+                      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                      .setContentTitle("מגביל רשתות פעיל")
+                      .setOngoing(true)
+                      .build()
+
+              fun warn(c: Context) {
+                  val msg = "זמן שימוש ברשתות עומד להסתיים בעוד 2 דקות"
+                  createChannels(c)
+                  val n = Notification.Builder(c, CH_ALERT)
+                      .setSmallIcon(android.R.drawable.stat_sys_warning)
+                      .setContentTitle("מגביל רשתות")
+                      .setContentText(msg)
+                      .setAutoCancel(true)
+                      .build()
+                  c.getSystemService(NotificationManager::class.java).notify(3, n)
+                  Toast.makeText(c, msg, Toast.LENGTH_LONG).show()
+              }
+
+              // נשלחת כשהשירות כבוי ואי אפשר להפעיל אותו מחדש אוטומטית
+              fun off(c: Context) {
+                  createChannels(c)
+                  val pi = PendingIntent.getActivity(
+                      c, 0, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                  )
+                  val n = Notification.Builder(c, CH_ALERT)
+                      .setSmallIcon(android.R.drawable.stat_sys_warning)
+                      .setContentTitle("מגביל רשתות כבוי")
+                      .setContentText("לחץ כדי להפעיל אותו מחדש בהגדרות נגישות")
+                      .setContentIntent(pi)
+                      .setAutoCancel(true)
+                      .build()
+                  c.getSystemService(NotificationManager::class.java).notify(2, n)
+              }
           }
           SLEOF
           mkdir -p app/src/main/java/com/example/sociallimiter
@@ -394,7 +655,12 @@ jobs:
               private fun today() = LocalDate.now().toString()
 
               fun limitMinutes(c: Context) = p(c).getInt("limit", 30)
-              fun setLimitMinutes(c: Context, v: Int) = p(c).edit().putInt("limit", v).apply()
+
+              // שמירת מגבלה נועלת אותה עד סוף היום
+              fun setLimitMinutes(c: Context, v: Int) =
+                  p(c).edit().putInt("limit", v).putString("limit_date", today()).apply()
+
+              fun limitLocked(c: Context) = p(c).getString("limit_date", "") == today()
 
               fun usedSeconds(c: Context): Int =
                   if (p(c).getString("date", "") == today()) p(c).getInt("secs", 0) else 0
@@ -406,18 +672,13 @@ jobs:
 
               fun isOver(c: Context) = usedSeconds(c) >= limitMinutes(c) * 60
 
-              // "דופק" של השירות: מתעדכן כל שנייה כשהשירות חי
+              // התראה "2 דקות לסיום" - פעם אחת ביום
+              fun warnedToday(c: Context) = p(c).getString("warn_date", "") == today()
+              fun setWarned(c: Context) = p(c).edit().putString("warn_date", today()).apply()
+
+              // "דופק" של השירות
               fun beat(c: Context) = p(c).edit().putLong("beat", System.currentTimeMillis()).apply()
               fun lastBeat(c: Context) = p(c).getLong("beat", 0L)
-
-              // יומן אירועים קצר (15 האחרונים)
-              fun log(c: Context, msg: String) {
-                  val t = java.text.SimpleDateFormat("dd/MM HH:mm:ss", java.util.Locale.US).format(java.util.Date())
-                  val old = p(c).getString("log", "") ?: ""
-                  val lines = (listOf("$t  $msg") + old.split("\n").filter { it.isNotBlank() }).take(15)
-                  p(c).edit().putString("log", lines.joinToString("\n")).apply()
-              }
-              fun logText(c: Context): String = p(c).getString("log", "") ?: ""
           }
           SLEOF
           mkdir -p app/src/main/res/values
